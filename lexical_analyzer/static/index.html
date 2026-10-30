@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lexical Analyzer Tool</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#1b2033;--mut:#6b7186;--bd:#dfe2ee;--ac:#4f46e5;
+--Keyword:#2563eb;--Identifier:#b45309;--Operator:#7c3aed;--Constant:#15803d;--Symbol:#0e7490;--Preprocessor:#be185d;--Comment:#8b90a3;--Error:#dc2626}
+@media(prefers-color-scheme:dark){:root{--bg:#12141c;--card:#1b1e2a;--tx:#e8eaf3;--mut:#9aa0b5;--bd:#2c3042;--ac:#818cf8;
+--Keyword:#60a5fa;--Identifier:#fbbf24;--Operator:#a78bfa;--Constant:#4ade80;--Symbol:#22d3ee;--Preprocessor:#f472b6;--Comment:#8b90a3;--Error:#f87171}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,Segoe UI,sans-serif}
+header{padding:18px 24px;border-bottom:1px solid var(--bd);background:var(--card)}h1{margin:0;font-size:20px}header p{margin:2px 0 0;color:var(--mut);font-size:13px}
+main{max-width:1200px;margin:0 auto;padding:20px;display:grid;gap:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px}h2{margin:0 0 10px;font-size:15px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+select,input,button{font:inherit;padding:7px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx)}
+button{cursor:pointer}button.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+textarea{width:100%;height:260px;font:13.5px/1.55 ui-monospace,Consolas,monospace;padding:10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);resize:vertical;tab-size:4}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.stat{border:1px solid var(--bd);border-radius:10px;padding:10px}.stat b{display:block;font-size:22px}.stat span{color:var(--mut);font-size:12px}
+pre#hl{margin:0;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--bd);font:13.5px/1.55 ui-monospace,Consolas,monospace;overflow:auto;max-height:340px;white-space:pre}
+pre#hl span{border-radius:3px;cursor:help}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.chip{padding:3px 10px;border-radius:99px;border:1px solid currentColor;font-size:12px;cursor:pointer;opacity:.4;user-select:none}.chip.on{opacity:1;font-weight:600}
+.tw{max-height:380px;overflow:auto}table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--bd)}th{position:sticky;top:0;background:var(--card)}
+td.v{font-family:ui-monospace,Consolas,monospace}.tag{font-weight:600}
+.diag{padding:6px 10px;border-left:4px solid var(--Error);background:var(--bg);margin:6px 0;border-radius:4px;cursor:pointer;font-size:13px}.diag.warning{border-color:var(--Identifier)}
+.ok{color:var(--Constant);font-weight:600}.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--mut)}.flow b{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:2px 8px;color:var(--tx)}
+</style></head><body>
+<header><h1>Lexical Analyzer Tool</h1><p>Identify tokens, keywords, operators and identifiers in source code</p></header>
+<main>
+<section class="card"><h2>1 · Source code</h2>
+<div class="bar"><select id="lang"></select><select id="sample"><option value="">Load sample…</option></select>
+<input type="file" id="file" hidden accept=".c,.h,.java,.py,.js,.txt"><button onclick="file.click()">Upload file</button>
+<button class="p" id="go">Analyze</button><button id="clr">Clear</button></div>
+<textarea id="code" spellcheck="false" placeholder="Type or paste source code here…"></textarea>
+<div class="flow" style="margin-top:8px"><b>Source code</b>→<b>Remove white space</b>→<b>Lexical scanner</b>→<b>Keyword / Identifier / Operator / Constant / Symbol</b>→<b>Token list</b>→<b>Display results</b></div></section>
+<section class="card"><h2>2 · Summary</h2><div class="stats" id="stats"></div></section>
+<section class="card"><h2>3 · Diagnostics</h2><div id="diags"></div></section>
+<section class="card"><h2>4 · Colour-coded source <small style="color:var(--mut)">(hover a token)</small></h2><pre id="hl"></pre></section>
+<section class="card"><h2>5 · Token list</h2>
+<div class="bar"><input id="q" placeholder="Search lexeme or category…"><button id="ej">Export JSON</button><button id="ec">Export CSV</button></div>
+<div class="chips" id="chips"></div><div class="tw"><table><thead><tr><th>#</th><th>Lexeme</th><th>Token type</th><th>Category</th><th>Line:Col</th></tr></thead><tbody id="rows"></tbody></table></div></section>
+</main>
+<script>
+const $=s=>document.querySelector(s),T=['Keyword','Identifier','Operator','Constant','Symbol','Preprocessor','Comment','Error'];
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let meta,res,on=new Set(T),timer;
+const code=$('#code'),lang=$('#lang'),file=$('#file');
+async function run(){
+  try{const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:code.value,language:lang.value})});
+  res=await r.json();if(res.error)throw Error(res.error);render();}
+  catch(e){$('#diags').innerHTML='<div class="diag">'+esc(e.message)+'</div>';}
+}
+function render(){
+  const s=res.stats,c=s.counts;
+  $('#stats').innerHTML=[['Tokens',s.tokens],...T.filter(t=>t!='Comment'||c[t]).map(t=>[t+'s',c[t]||0]),['Lines',s.lines],['Whitespace removed',s.whitespace]]
+   .map(([k,v])=>`<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('');
+  $('#diags').innerHTML=res.diagnostics.length?res.diagnostics.map(d=>`<div class="diag ${d.sev}" onclick="jump(${d.start},${d.len})"><b>${d.sev.toUpperCase()}</b> line ${d.line}, col ${d.col}: ${esc(d.msg)}</div>`).join(''):'<span class="ok">✔ No lexical errors found.</span>';
+  let h='',p=0;const src=code.value;
+  for(const t of res.tokens){h+=esc(src.slice(p,t.start));
+    h+=`<span style="color:var(--${t.type});${t.type=='Error'?'text-decoration:underline wavy;':''}" title="${esc(t.type+' · '+t.sub+(t.msg?' — '+t.msg:'')+' ('+t.line+':'+t.col+')')}">${esc(t.value)}</span>`;p=t.start+t.len;}
+  $('#hl').innerHTML=h+esc(src.slice(p));
+  $('#chips').innerHTML=T.map(t=>`<span class="chip ${on.has(t)?'on':''}" style="color:var(--${t})" data-t="${t}">${t} ${c[t]||0}</span>`).join('');
+  rows();
+}
+function rows(){
+  const q=$('#q').value.toLowerCase();
+  $('#rows').innerHTML=res.tokens.filter(t=>on.has(t.type)&&(t.value+t.type+t.sub).toLowerCase().includes(q)).map(t=>
+   `<tr><td>${t.id}</td><td class="v">${esc(t.value.length>60?t.value.slice(0,60)+'…':t.value)}</td><td class="tag" style="color:var(--${t.type})">${t.type}</td><td>${esc(t.sub)}</td><td>${t.line}:${t.col}</td></tr>`).join('');
+}
+function jump(st,len){code.focus();code.setSelectionRange(st,st+len);}
+function dl(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();}
+$('#chips').onclick=e=>{const t=e.target.dataset.t;if(!t)return;on.has(t)?on.delete(t):on.add(t);render();};
+$('#q').oninput=()=>res&&rows();
+$('#go').onclick=run;$('#clr').onclick=()=>{code.value='';run();};
+code.oninput=()=>{clearTimeout(timer);timer=setTimeout(run,250);};lang.onchange=run;
+code.onkeydown=e=>{if(e.key=='Tab'){e.preventDefault();document.execCommand('insertText',false,'    ');}};
+$('#sample').onchange=e=>{const s=meta.samples[e.target.value];if(s){code.value=s.code;lang.value=s.language;run();}};
+file.onchange=e=>{const f=e.target.files[0];if(!f)return;const ext=f.name.split('.').pop().toLowerCase();
+  const m={c:'c',h:'c',java:'java',py:'python',js:'js'};if(m[ext])lang.value=m[ext];
+  const r=new FileReader();r.onload=()=>{code.value=r.result;run();};r.readAsText(f);e.target.value='';};
+$('#ej').onclick=()=>res&&dl('tokens.json',JSON.stringify(res.tokens,null,2),'application/json');
+$('#ec').onclick=()=>res&&dl('tokens.csv','id,lexeme,type,category,line,col\n'+res.tokens.map(t=>[t.id,JSON.stringify(t.value),t.type,t.sub,t.line,t.col].join(',')).join('\n'),'text/csv');
+(async()=>{meta=await (await fetch('/api/meta')).json();
+  lang.innerHTML=Object.entries(meta.languages).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+  $('#sample').innerHTML+=meta.samples.map((s,i)=>`<option value="${i}">${esc(s.name)}</option>`).join('');
+  code.value=meta.samples[0].code;run();})();
+</script></body></html>
